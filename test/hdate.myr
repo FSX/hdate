@@ -12,6 +12,11 @@ const main = {
 	var now = date.utcnow()
 
 	var n_time_ago_tests : n_period_test[:] = [
+		[.input="now", .periods=[][:]],
+		[.input="today", .periods=[][:]],
+		[.input="yesterday", .periods=[`date.Day 1][:]],
+		[.input="the day before yesterday", .periods=[`date.Day 2][:]],
+		[.input="last week", .periods=[`date.Day 7][:]],
 		[.input="3 sec ago", .periods=[`date.Second 3][:]],
 		[.input="1 second ago", .periods=[`date.Second 1][:]],
 		[.input="3 seconds ago", .periods=[`date.Second 3][:]],
@@ -31,8 +36,13 @@ const main = {
 		[.input="3 months ago", .periods=[`date.Month 3][:]],
 		[.input="1 year ago", .periods=[`date.Year 1][:]],
 		[.input="3 years ago", .periods=[`date.Year 3][:]],
+		[.input="3 years and 2 months ago", .periods=[`date.Year 3, `date.Month 2][:]],
+		[.input="3 years, 2 months and 5 days ago", .periods=[`date.Year 3, `date.Month 2, `date.Day 5][:]],
 	][:]
 	var n_time_from_now_tests : n_period_test[:] = [
+		[.input="tomorrow", .periods=[`date.Day 1][:]],
+		[.input="the day after tomorrow", .periods=[`date.Day 2][:]],
+		[.input="next week", .periods=[`date.Day 7][:]],
 		[.input="3 sec from now", .periods=[`date.Second 3][:]],
 		[.input="1 second from now", .periods=[`date.Second 1][:]],
 		[.input="3 seconds from now", .periods=[`date.Second 3][:]],
@@ -52,17 +62,19 @@ const main = {
 		[.input="3 months from now", .periods=[`date.Month 3][:]],
 		[.input="1 year from now", .periods=[`date.Year 1][:]],
 		[.input="3 years from now", .periods=[`date.Year 3][:]],
+		[.input="3 years and 2 months from now", .periods=[`date.Year 3, `date.Month 2][:]],
+		[.input="3 years and 2 months and 5 days from now", .periods=[`date.Year 3, `date.Month 2, `date.Day 5][:]],
 	][:]
 
 	testr.run([
 		[.name="n_time_ago", .fn={ctx
 			for t : n_time_ago_tests
-				check_period(ctx, t.input, subperiods(now, t.periods))
+				checkdate(ctx, t.input, subperiods(now, t.periods))
 			;;
 		}],
 		[.name="n_time_from_now", .fn={ctx
 			for t : n_time_from_now_tests
-				check_period(ctx, t.input, addperiods(now, t.periods))
+				checkdate(ctx, t.input, addperiods(now, t.periods))
 			;;
 		}],
 	][:])
@@ -82,13 +94,13 @@ const addperiods = {d : date.instant, dts : date.period[:] -> date.instant
 	-> d
 }
 
-const check_period = {ctx : testr.ctx#, a : byte[:], b : date.instant
-	match hdate.hdate(a)
-	| `std.Some n:
+const checkdate = {ctx : testr.ctx#, a : byte[:], b : date.instant
+	match hdate.parseh(a)
+	| `std.Ok n:
 		var as = std.fmt("{}", n)
 		var bs = std.fmt("{}", b)
 		testr.check(ctx, std.eq(as, bs), std.fmt("{}: {} != {}", a, as, bs))
-	| `std.None:
+	| `std.Err e:
 		testr.fail(ctx, "got none")
 	;;
 }

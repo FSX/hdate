@@ -2,73 +2,95 @@ use date
 use std
 
 pkg hdate =
-	const hdate : (s : byte[:] -> std.option(date.instant))
+	type parsefail = union
+		`MissingSuffix
+		`Unknown
+	;;
+
+	const parseh	: (s: byte[:]	-> std.result(date.instant, parsefail))
+	const parsehl	: (s: byte[:]	-> std.result(date.instant, parsefail))
+	const parsehz	: (s: byte[:], tz : byte[:]	-> std.result(date.instant, parsefail))
 ;;
 
-// TODO: Longest form must be first.
-var formats = [
-	"%b %d %Y, %I:%M %P", /* Jan 22 2016, 11:00 pm */
-	"%Y-%m-%d %H:%M:%S",  /* 2016-01-22 23:00:00 */
-	"%Y-%m-%d",           /* 2016-01-22 */
-	"%m/%d/%y",           /* 22-01-16 */
-	"%y-%m-%d",           /* 16-22-31 */
-	"%H:%M:%S %P",        /* 23:00:00 pm */
-	"%H:%M %P",           /* 23:00:00 pm */
-	"%m %B %Y",           /* 02 January 2016 */
-]
+const parseh = {s; -> parserelative(s)}
 
-const strfindfirst = {haytack, needles -> std.option((std.size, std.size))
-	var result = `std.None
+const parsehl = {s
+	match parserelative(s)
+	| `std.Ok d: -> `std.Ok date.mkinstant(d.actual, "local")
+	| `std.Err e: -> `std.Err e
+	;;
+}
 
-	for n : needles
-		match std.strfind(haytack, n)
-		| `std.Some x:
-			match result
-			| `std.Some (y, _):
-				if x < y
-					result = `std.Some (x, n.len)
-				;;
-			| `std.None:
-				result = `std.Some (x, n.len)
-			;;
-		| _:
+const parsehz = {s, tz
+	match parserelative(s)
+	| `std.Ok d: -> `std.Ok date.mkinstant(d.actual, tz)
+	| `std.Err e: -> `std.Err e
+	;;
+}
+
+const parserelative = {s
+	var n = date.utcnow()
+
+	match s
+	| "now":                      -> `std.Ok n
+	| "today":                    -> `std.Ok n
+	| "tomorrow":                 -> `std.Ok date.addperiod(n, `date.Day 1)
+	| "yesterday":                -> `std.Ok date.subperiod(n, `date.Day 1)
+	| "the day after tomorrow":   -> `std.Ok date.addperiod(n, `date.Day 2)
+	| "the day before yesterday": -> `std.Ok date.subperiod(n, `date.Day 2)
+	| "last week":                -> `std.Ok date.subperiod(n, `date.Day 7)
+	| "next week":                -> `std.Ok date.addperiod(n, `date.Day 7)
+	| _:                          /* do nothing */
+	;;
+
+	var f
+
+	if std.hassuffix(s, " ago")
+		f = date.subperiod
+	elif std.hassuffix(s, " from now")
+		f = date.addperiod
+	else
+		-> `std.Err `MissingSuffix
+	;;
+
+	s = s[:s.len-4]
+
+	for t : strsplitm(s, [", ", ", and ", " and "][:])
+		match parseperiod(t)
+		| `std.Some p: n = f(n, p)
+		| `std.None:   -> `std.Err `Unknown
 		;;
 	;;
 
+	-> `std.Ok n
+}
+
+const parseperiod = {s : byte[:] -> std.option(date.period)
+	if std.hasprefix(s, "a ")
+		s = s[2:]
+	;;
+
+	var tokens = std.strtok(s)
+	var number = 1
+	var result = `std.None
+
+	for t : tokens
+		match mkperiod(t, number)
+		| `std.Some p:
+			result = `std.Some p
+			break
+		| `std.None:
+			match std.intparse(t)
+			| `std.Some n: number = n
+			| `std.None: break
+			;;
+		;;
+	;;
+
+	std.slfree(tokens)
+
 	-> result
 }
-
-type strsplitmiter = struct
-	input  : byte[:]
-	delims : byte[:][:]
-;;
-
-const strsplitm = {input, delims -> strsplitmiter
-	-> [.input=input, .delims=delims]
-}
-
-impl iterable strsplitmiter -> byte[:] =
-	__iternext__ = {itp, valp
-		if itp.input.len == 0
-			-> false
-		;;
-
-		match strfindfirst(itp.input, itp.delims)
-		| `std.Some (p, l):
-			valp# = itp.input[:p]
-			itp.input = itp.input[p+l:]
-		| `std.None:
-			valp# = itp.input
-			itp.input = itp.input[itp.input.len:]
-		;;
-
-		-> true
-	}
-
-	__iterfin__ = {itp, valp
-		/* nothing to clean up */
-	}
-;;
 
 const mkperiod = {s, n -> std.option(date.period)
 	var p
@@ -99,107 +121,55 @@ const mkperiod = {s, n -> std.option(date.period)
 	-> `std.Some p
 }
 
-const hperiod = {s : byte[:] -> std.option(date.period)
-	if std.hasprefix(s, "a ")
-		s = s[2:]
-	;;
-
-	var tokens = std.strtok(s)
-	var number = 1
+const strfindfirst = {haytack, needles -> std.option((std.size, std.size))
 	var result = `std.None
 
-	for t : tokens
-		match mkperiod(t, number)
-		| `std.Some p:
-			result = `std.Some p
-			break
-		| `std.None:
-			match std.intparse(t)
-			| `std.Some n: number = n
-			| `std.None: break
+	for n : needles
+		match std.strfind(haytack, n)
+		| `std.Some x:
+			match result
+			| `std.Some (y, _):
+				if x < y
+					result = `std.Some (x, n.len)
+				;;
+			| `std.None:
+				result = `std.Some (x, n.len)
 			;;
+		| _:
 		;;
 	;;
-
-	std.slfree(tokens)
 
 	-> result
 }
 
-const ntimeago = {s : byte[:] -> std.option(date.instant)
-	var f
-
-	if std.hassuffix(s, " ago")
-		f = date.subperiod
-	elif std.hassuffix(s, " from now")
-		f = date.addperiod
-	else
-		-> `std.None
-	;;
-
-	s = s[:s.len-4]
-	var now = date.utcnow()
-
-	for t : strsplitm(s, [", ", " and "][:])
-		match hperiod(t)
-		| `std.Some p: now = f(now, p)
-		| `std.None:   -> `std.None
-		;;
-	;;
-
-	-> `std.Some now
+const strsplitm = {input, delims -> strsplitmiter
+	-> [.input=input, .delims=delims]
 }
 
-// TODO: Error handling. The user has to know what went wrong.
-const hdate = {s : byte[:] -> std.option(date.instant)
-	var now = date.utcnow()
+type strsplitmiter = struct
+	input  : byte[:]
+	delims : byte[:][:]
+;;
 
-	match s
-	| "now":                      -> `std.Some now
-	| "today":                    -> `std.Some now
-	| "tomorrow":                 -> `std.Some date.addperiod(now, `date.Day 1)
-	| "yesterday":                -> `std.Some date.subperiod(now, `date.Day 1)
-	| "the day after tomorrow":   -> `std.Some date.addperiod(now, `date.Day 2)
-	| "the day before yesterday": -> `std.Some date.subperiod(now, `date.Day 2)
-	| "last week":                -> `std.Some date.subperiod(now, `date.Day 7)
-	| "next week":                -> `std.Some date.addperiod(now, `date.Day 7)
-	| _:                          /* do nothing */
-	;;
-
-	if std.hassuffix(s, " ago") || std.hassuffix(s, " from now")
-		-> ntimeago(s)
-	;;
-
-	// TODO: Zero pad numbers.
-	// Using parsefmt with a list of patterns is only going to work in
-	// Some cases? Is there a check on something thats a alid day or
-	// month number?
-	for f : formats
-		match date.parsefmt(f, s)
-		| `std.Ok r:  -> `std.Some r
-		| `std.Err e: continue
+impl iterable strsplitmiter -> byte[:] =
+	__iternext__ = {itp, valp
+		if itp.input.len == 0
+			-> false
 		;;
-	;;
 
-	-> `std.None
-}
+		match strfindfirst(itp.input, itp.delims)
+		| `std.Some (p, l):
+			valp# = itp.input[:p]
+			itp.input = itp.input[p+l:]
+		| `std.None:
+			valp# = itp.input
+			itp.input = itp.input[itp.input.len:]
+		;;
 
-/*const main = {
-	std.put("hdate: {}\n", hdate("3 seconds ago"))
-	std.put("hdate: {}\n", hdate("a day ago"))
-	std.put("hdate: {}\n", hdate("2 years ago"))
-	std.put("hdate: {}\n", hdate("1 year and 2 months ago"))
-	std.put("hdate: {}\n", hdate("1 year and 2 months ago"))
-	std.put("hdate: {}\n", hdate("1 year, 2 months and 3 days ago"))
-	std.put("hdate: {}\n", hdate("2017 years and 4 days ago"))
-	std.put("hdate: {}\n", hdate("2000 years garbage"))
-	std.put("hdate: {}\n", hdate("today"))
-	std.put("hdate: {}\n", hdate("tomorrow"))
-	std.put("hdate: {}\n", hdate("yesterday"))
-	std.put("hdate: {}\n", hdate("a day ago"))
-	std.put("hdate: {}\n", hdate("5 days ago"))
-	std.put("hdate: {}\n", hdate("Jan 01 2016, 11:00 pm"))
-	std.put("hdate: {}\n", hdate("2016-01-01"))
-	std.put("hdate: {}\n", hdate("2016-01-01 23:00:00"))
-	std.put("hdate: {}\n", hdate("2 years from now"))
-}*/
+		-> true
+	}
+
+	__iterfin__ = {itp, valp
+		/* nothing to clean up */
+	}
+;;
